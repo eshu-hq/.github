@@ -32,8 +32,10 @@ jobs:
       - name: GREEN whole-repo lint under org config
         run: |
           go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-          golangci-lint run ./selftest/good/...
-        working-directory: .
+          cp ../../.golangci.yml .golangci.yml
+          golangci-lint run ./...
+          rm .golangci.yml
+        working-directory: selftest/good
 
   red:
     runs-on: ubuntu-latest

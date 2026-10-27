@@ -4,7 +4,8 @@ Shared reusable Go CI for Eshu collectors and `eshu-sdk` (versioned, pinned).
 
 - Reusable lanes: `.github/workflows/go-collector-ci.yml` (`workflow_call`).
 - Org lint config: `.golangci.yml` (golangci-lint v2.12.2; govet,
-  staticcheck, ineffassign, unused, errcheck, gosimple; formatter gofumpt).
+  staticcheck — subsumes gosimple in v2 — ineffassign, unused, errcheck;
+  formatter gofumpt).
 - Stable job names (frozen): `lint`, `test`, `race`, `shell`, `image`,
   `govulncheck`, `gosec`, `ci-complete`. Only `ci-complete` is required.
 - Rules: whole-repo lint to zero, no baselines; one exclusion = one reason +
