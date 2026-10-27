@@ -64,8 +64,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f883bedcfbabaeaed0a
-      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c24be8b25114
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ inputs.go-version }}
           cache-dependency-path: ${{ inputs.working-directory }}/go.sum
@@ -97,8 +97,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f883bedcfbabaeaed0a
-      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c24be8b25114
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ inputs.go-version }}
       - name: build
@@ -113,8 +113,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f883bedcfbabaeaed0a
-      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c24be8b25114
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ inputs.go-version }}
       - name: race + coverprofile
@@ -129,7 +129,7 @@ jobs:
           echo "total=$total floor=${{ inputs.coverage-floor }}"
           awk -v t="$total" -v f="${{ inputs.coverage-floor }}" 'BEGIN { if (t + 0 < f + 0) { print "FAIL: coverage below floor"; exit 1 } }'
         working-directory: ${{ inputs.working-directory }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540e4489e45b6eb9f30b0b0df
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540e4489e45b6eb9f30b0b0df # v4
         with:
           name: coverage-${{ inputs.module }}
           path: ${{ inputs.working-directory }}/coverage.out
@@ -140,9 +140,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f883bedcfbabaeaed0a
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: shellcheck
-        uses: ludeeus/action-shellcheck@f5b90e8bf0bd0a1f706a7d0a9e1a0b2d4db1d94a
+        uses: ludeeus/action-shellcheck@00b27aa7cb85167568cb48a3838b75f4265f2bca
         with:
           scandir: .
 
@@ -151,7 +151,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f883bedcfbabaeaed0a
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: build image (no push)
         run: docker build .
 
@@ -159,8 +159,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f883bedcfbabaeaed0a
-      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c24be8b25114
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: ${{ inputs.go-version }}
       - name: govulncheck
@@ -173,12 +173,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f883bedcfbabaeaed0a
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: gosec SARIF (advisory)
-        uses: securego/gosec@7de6dd13bb9d087e819e8583b555d2e5b876b3e
+        uses: securego/gosec@22fd014b7bfcd88c892bfccea1784cade496cdef
         with:
           args: -fmt sarif -out gosec.sarif ./...
-      - uses: github/codeql-action/upload-sarif@31cb49c71c25ff73fb2e67bbf58bb10019c9160
+      - uses: github/codeql-action/upload-sarif@793b778da9c9275a0f276522b27cb5fc14bba279 # v4
         with:
           sarif_file: gosec.sarif
         continue-on-error: true
