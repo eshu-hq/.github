@@ -88,7 +88,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
       - name: 500-line file cap (wc -l, sole static gate)
         run: |
-          over=$(find . -name '*.go' -not -path './vendor/*' -exec wc -l {} + | awk '$1 > 500 {print}')
+          over=$(find . -name '*.go' -not -path './vendor/*' -exec wc -l {} + | awk '$1 > 500 && $2 != "total" {print}')
           if [ -n "$over" ]; then echo "$over"; echo "FAIL: .go files over 500 lines"; exit 1; fi
         working-directory: ${{ inputs.working-directory }}
 
