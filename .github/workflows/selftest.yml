@@ -59,22 +59,24 @@ jobs:
           echo "gen.go lines=$lines"
           test "$lines" -gt 500
       - name: ci-complete aggregation logic must fail on failed lanes
-        # Regression guard for the false-green where toJSON(needs) fed job
-        # OBJECTS to the failure check (run 40598497783): the aggregator must
-        # read needs.*.result. Runs the exact snippet shape from
-        # go-collector-ci.yml against canned red/green payloads.
+        # Regression guard: the aggregator compares v["result"] per job.
+        # History: comparing whole job OBJECTS to "failure" never matched
+        # (false-green, run 40598497783); needs.*.result is a bare ARRAY
+        # that kills green runs on AttributeError. Runs the exact snippet
+        # shape from go-collector-ci.yml against canned red/green payloads.
         run: |
           cat > /tmp/agg_check.py <<'EOF'
           import json, os, sys
           needs = json.loads(os.environ["NEEDS_JSON"])
-          bad = {k: v for k, v in needs.items() if v in ("failure", "cancelled")}
+          bad = {k: v.get("result") for k, v in needs.items()
+                 if isinstance(v, dict) and v.get("result") in ("failure", "cancelled")}
           if bad:
               print("FAIL:", bad)
               sys.exit(1)
           print("ci-complete: pass (skips allowed)")
           EOF
-          NEEDS_JSON='{"lint":"failure","test":"success","race":"skipped"}' python3 /tmp/agg_check.py && { echo "FAIL: red payload passed"; exit 1; }
-          NEEDS_JSON='{"lint":"success","test":"success","race":"skipped"}' python3 /tmp/agg_check.py
+          NEEDS_JSON='{"lint":{"result":"failure","outputs":{}},"test":{"result":"success","outputs":{}},"race":{"result":"skipped","outputs":{}}}' python3 /tmp/agg_check.py && { echo "FAIL: red payload passed"; exit 1; }
+          NEEDS_JSON='{"lint":{"result":"success","outputs":{}},"test":{"result":"success","outputs":{}},"race":{"result":"skipped","outputs":{}}}' python3 /tmp/agg_check.py
           echo "aggregator guard green"
 
   shell:
