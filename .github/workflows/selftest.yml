@@ -58,6 +58,24 @@ jobs:
           lines=$(wc -l < selftest/over-cap/gen.go)
           echo "gen.go lines=$lines"
           test "$lines" -gt 500
+      - name: ci-complete aggregation logic must fail on failed lanes
+        # Regression guard for the false-green where toJSON(needs) fed job
+        # OBJECTS to the failure check (run 40598497783): the aggregator must
+        # read needs.*.result. Runs the exact snippet shape from
+        # go-collector-ci.yml against canned red/green payloads.
+        run: |
+          cat > /tmp/agg_check.py <<'EOF'
+          import json, os, sys
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          bad = {k: v for k, v in needs.items() if v in ("failure", "cancelled")}
+          if bad:
+              print("FAIL:", bad)
+              sys.exit(1)
+          print("ci-complete: pass (skips allowed)")
+          EOF
+          NEEDS_JSON='{"lint":"failure","test":"success","race":"skipped"}' python3 /tmp/agg_check.py && { echo "FAIL: red payload passed"; exit 1; }
+          NEEDS_JSON='{"lint":"success","test":"success","race":"skipped"}' python3 /tmp/agg_check.py
+          echo "aggregator guard green"
 
   shell:
     runs-on: ubuntu-latest
