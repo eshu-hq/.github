@@ -1,0 +1,68 @@
+# Self-tests for the reusable Go CI: GREEN fixture passes, RED fixtures fail.
+# Runs on push/PR to main. Pins actions by SHA, least-privilege, timeouts.
+name: selftest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f883bedcfbabaeaed0a
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c24be8b25114
+        with:
+          go-version: "1.26.6"
+      - name: GREEN vet+test+gofumpt-shape
+        run: |
+          cd selftest/good
+          go vet ./...
+          go test ./... -count=1
+          test -z "$(gofmt -l .)"
+      - name: GREEN whole-repo lint under org config
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+          golangci-lint run ./selftest/good/...
+        working-directory: .
+
+  red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f883bedcfbabaeaed0a
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c24be8b25114
+        with:
+          go-version: "1.26.6"
+      - name: RED vet fixture must fail
+        run: |
+          cd selftest/bad-vet
+          if go vet ./...; then echo "FAIL: bad-vet passed vet"; exit 1; fi
+      - name: RED format fixture must be flagged
+        run: |
+          test -n "$(gofmt -l selftest/bad-fmt/)"
+      - name: RED 500-line cap fixture must trip
+        run: |
+          ./selftest/over-cap/gen.sh
+          lines=$(wc -l < selftest/over-cap/gen.go)
+          echo "gen.go lines=$lines"
+          test "$lines" -gt 500
+
+  shell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f883bedcfbabaeaed0a
+      - name: shellcheck selftest scripts
+        uses: ludeeus/action-shellcheck@f5b90e8bf0bd0a1f706a7d0a9e1a0b2d4db1d94a
+        with:
+          scandir: selftest
