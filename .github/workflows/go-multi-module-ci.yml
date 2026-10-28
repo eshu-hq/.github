@@ -311,7 +311,7 @@ jobs:
         run: GOWORK=off go test -race ./... -count=1 -coverprofile=coverage.out
         working-directory: ${{ matrix.module }}
       - name: Upload coverprofile
-        uses: actions/upload-artifact@ea165f8d65b6e75b540e4489e45b6eb9f30b0b0df # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-${{ steps.names.outputs.slug }}
           path: ${{ matrix.module }}/coverage.out
@@ -411,7 +411,7 @@ jobs:
         run: GOWORK=off gosec -fmt sarif -out "../gosec-${{ steps.names.outputs.slug }}.sarif" ./... > "../gosec-${{ steps.names.outputs.slug }}.log" 2>&1 || true
         working-directory: ${{ matrix.module }}
       - name: Upload SARIF
-        uses: actions/upload-artifact@ea165f8d65b6e75b540e4489e45b6eb9f30b0b0df # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gosec-${{ steps.names.outputs.slug }}
           path: |
