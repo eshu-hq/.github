@@ -1,0 +1,14 @@
+.github/workflows/go-multi-module-ci.yml
+  h_78a442cba0b3e6 118,228-229,277-278,298-299,314,336,347,360,373-374,396-397,414,427,430,445,458
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "90bd3150c0d59bef7b458e40ec67f6d328525758",
+  "prompts": {},
+  "humans": {
+    "h_78a442cba0b3e6": {
+      "author": "Allen Sanabria <asanabria6910@gmail.com>"
+    }
+  }
+}
