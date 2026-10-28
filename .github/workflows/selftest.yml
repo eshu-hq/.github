@@ -88,3 +88,11 @@ jobs:
         uses: ludeeus/action-shellcheck@00b27aa7cb85167568cb48a3838b75f4265f2bca
         with:
           scandir: selftest
+
+  multimodule-shape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: seeded RED/GREEN proof for go-multi-module-ci
+        run: bash selftest/check-multi-module.sh
