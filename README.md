@@ -50,3 +50,5 @@ jobs:
   classifier with RED/GREEN file lists (wired as `multimodule-shape` in
   `selftest.yml`); `selftest-multimodule-caller.yml` executes the reusable
   against `selftest/modules/{alpha,beta}` on every PR and push.
+
+<!-- probe: docs-only change to exercise the all-skipped path (Refs #5) -->
