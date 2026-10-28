@@ -1,0 +1,38 @@
+.github/workflows/go-multi-module-ci.yml
+  h_78a442cba0b3e6 1-494
+.github/workflows/selftest-multimodule-caller.yml
+  h_78a442cba0b3e6 1-18
+.github/workflows/selftest.yml
+  h_78a442cba0b3e6 91-98
+README.md
+  h_78a442cba0b3e6 26-52
+selftest/check-multi-module.sh
+  h_78a442cba0b3e6 1-190
+selftest/modules/alpha/.golangci.yml
+  h_78a442cba0b3e6 1-28
+selftest/modules/alpha/alpha.go
+  h_78a442cba0b3e6 1-6
+selftest/modules/alpha/alpha_test.go
+  h_78a442cba0b3e6 1-11
+selftest/modules/alpha/go.mod
+  h_78a442cba0b3e6 1-3
+selftest/modules/beta/.golangci.yml
+  h_78a442cba0b3e6 1-28
+selftest/modules/beta/beta.go
+  h_78a442cba0b3e6 1-6
+selftest/modules/beta/beta_test.go
+  h_78a442cba0b3e6 1-11
+selftest/modules/beta/go.mod
+  h_78a442cba0b3e6 1-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "83072e0f440fe3412bad12f1442532808c24580a",
+  "prompts": {},
+  "humans": {
+    "h_78a442cba0b3e6": {
+      "author": "Allen Sanabria <asanabria6910@gmail.com>"
+    }
+  }
+}
