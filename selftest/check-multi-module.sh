@@ -227,6 +227,43 @@ else
   pass "no job-level if references matrix"
 fi
 
+# --- 11b. Every action pin is 40-hex and recorded-verified (no dead pins). ---
+# (guards the .github#3 class: a dead/truncated SHA must fail shape, not CI;
+# extend VERIFIED_PINS with the API verification whenever a pin changes.)
+VERIFIED_PINS='3d3c42e5aac5ba805825da76410c181273ba90b1
+b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+cf430e030ddbb5b0abf93d22962f4752f3646cd9
+11d5960a326750d5838078e36cf38b85af677262
+40f1582b2485089dde7abd97c1529aa768e1baff
+ea165f8d65b6e75b540449e92b4886f43607fa02
+9b3254085494b55a0f7c4c2b3d2d52cc712ce370
+00b27aa7cb85167568cb48a3838b75f4265f2bca
+22fd014b7bfcd88c892bfccea1784cade496cdef'
+pin_fail=0
+while IFS= read -r ref; do
+  case "$ref" in
+    ./*) continue ;; # local workflow ref, always allowed
+  esac
+  sha="${ref##*@}"
+  if [ "${#sha}" -ne 40 ]; then
+    fail "action pin is not 40-hex: $ref"
+    pin_fail=1
+  elif printf '%s' "$sha" | grep -q '[^0-9a-f]'; then
+    fail "action pin has non-hex chars: $ref"
+    pin_fail=1
+  elif printf '%s\n' "$VERIFIED_PINS" | grep -Fxq -- "$sha"; then
+    :
+  else
+    fail "action pin not in the recorded verified set: $ref"
+    pin_fail=1
+  fi
+done <<EOF
+$(rg -No --no-filename 'uses: [^ ]+' "$REPO_ROOT/.github/workflows/"*.yml | sed 's/^uses: //')
+EOF
+if [ "$pin_fail" -eq 0 ]; then
+  pass "all action pins 40-hex and recorded-verified (local refs allowed)"
+fi
+
 # --- 11. ci-complete stays skip-aware (v["result"] shape, seeded RED/GREEN). ---
 if grep -q 'v.get("result")' "$WF"; then
   pass "aggregator compares v[result], not whole job objects"
