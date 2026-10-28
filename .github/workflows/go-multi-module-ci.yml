@@ -220,6 +220,9 @@ jobs:
 
   lint:
     needs: changes
+    # Skip by condition, not by empty matrix: an empty matrix reports
+    # needs.lint.result as failure, a condition skip reports skipped.
+    if: needs.changes.outputs.lint != '[]'
     name: lint (${{ matrix.module }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -269,6 +272,8 @@ jobs:
 
   test:
     needs: changes
+    # Skip by condition, not by empty matrix (see lint).
+    if: needs.changes.outputs.test != '[]'
     name: test (${{ matrix.module }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -290,6 +295,8 @@ jobs:
 
   race:
     needs: changes
+    # Skip by condition, not by empty matrix (see lint).
+    if: needs.changes.outputs.race != '[]'
     name: race (${{ matrix.module }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -365,6 +372,8 @@ jobs:
 
   govulncheck:
     needs: changes
+    # Skip by condition, not by empty matrix (see lint).
+    if: needs.changes.outputs.vuln != '[]'
     name: govulncheck (${{ matrix.module }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -385,6 +394,8 @@ jobs:
 
   gosec:
     needs: changes
+    # Skip by condition, not by empty matrix (see lint).
+    if: needs.changes.outputs.sec != '[]'
     name: gosec (${{ matrix.module }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
