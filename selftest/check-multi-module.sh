@@ -240,26 +240,38 @@ ea165f8d65b6e75b540449e92b4886f43607fa02
 00b27aa7cb85167568cb48a3838b75f4265f2bca
 22fd014b7bfcd88c892bfccea1784cade496cdef'
 pin_fail=0
-while IFS= read -r ref; do
-  case "$ref" in
-    ./*) continue ;; # local workflow ref, always allowed
-  esac
-  sha="${ref##*@}"
-  if [ "${#sha}" -ne 40 ]; then
-    fail "action pin is not 40-hex: $ref"
-    pin_fail=1
-  elif printf '%s' "$sha" | grep -q '[^0-9a-f]'; then
-    fail "action pin has non-hex chars: $ref"
-    pin_fail=1
-  elif printf '%s\n' "$VERIFIED_PINS" | grep -Fxq -- "$sha"; then
-    :
+if refs="$(rg -No --no-filename 'uses: [^ ]+' "$REPO_ROOT"/.github/workflows/*.yml | sed 's/^uses: //')"; then
+  if [ -z "$refs" ]; then
+    fail "pin census: uses-ref extraction found nothing"
   else
-    fail "action pin not in the recorded verified set: $ref"
-    pin_fail=1
-  fi
-done <<EOF
-$(rg -No --no-filename 'uses: [^ ]+' "$REPO_ROOT/.github/workflows/"*.yml | sed 's/^uses: //')
+    while IFS= read -r ref; do
+      case "$ref" in
+        '' | [!0-9a-zA-Z./-]*)
+          fail "pin census: blank or malformed uses line among $(printf '%s' "$refs" | wc -l) extracted refs"
+          pin_fail=1
+          continue ;;
+        ./*) continue ;; # local workflow ref, always allowed
+      esac
+      sha="${ref##*@}"
+      if [ "${#sha}" -ne 40 ]; then
+        fail "action pin is not 40-hex: $ref"
+        pin_fail=1
+      elif printf '%s' "$sha" | grep -q '[^0-9a-f]'; then
+        fail "action pin has non-hex chars: $ref"
+        pin_fail=1
+      elif printf '%s\n' "$VERIFIED_PINS" | grep -Fxq -- "$sha"; then
+        :
+      else
+        fail "action pin not in the recorded verified set: $ref"
+        pin_fail=1
+      fi
+    done <<EOF
+$refs
 EOF
+  fi
+else
+  fail "pin census: uses-ref extraction failed"
+fi
 if [ "$pin_fail" -eq 0 ]; then
   pass "all action pins 40-hex and recorded-verified (local refs allowed)"
 fi
