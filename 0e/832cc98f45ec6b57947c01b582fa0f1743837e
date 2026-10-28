@@ -1,0 +1,14 @@
+selftest/check-multi-module.sh
+  h_78a442cba0b3e6 243-245,247-269,271-274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0e832cc98f45ec6b57947c01b582fa0f1743837e",
+  "prompts": {},
+  "humans": {
+    "h_78a442cba0b3e6": {
+      "author": "Allen Sanabria <asanabria6910@gmail.com>"
+    }
+  }
+}
