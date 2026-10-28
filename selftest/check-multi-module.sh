@@ -254,7 +254,8 @@ cf430e030ddbb5b0abf93d22962f4752f3646cd9
 ea165f8d65b6e75b540449e92b4886f43607fa02
 9b3254085494b55a0f7c4c2b3d2d52cc712ce370
 00b27aa7cb85167568cb48a3838b75f4265f2bca
-22fd014b7bfcd88c892bfccea1784cade496cdef'
+22fd014b7bfcd88c892bfccea1784cade496cdef
+00cae500b08a931fb5698e11e79bfbd38e612a38'
 pin_fail=0
 if refs="$(grep -rho 'uses: [^ ]*' "$REPO_ROOT"/.github/workflows/*.yml | sed 's/^uses: //')"; then
   if [ -z "$refs" ]; then

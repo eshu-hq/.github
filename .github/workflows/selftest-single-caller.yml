@@ -1,0 +1,39 @@
+# Live execution proof for go-collector-ci v2: calls the reusable in this
+# repo by local path, gating the selftest fixture module on every PR/push.
+# contents:read alone must suffice (fork-safety: no secrets, no extra perms).
+name: selftest-single-caller
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selftest-single-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  single:
+    uses: ./.github/workflows/go-collector-ci.yml
+    with:
+      module: single-fixture
+      working-directory: selftest/single
+      go-version-file: selftest/single/go.mod
+      coverage-floor: 80
+      run-lint: true
+      run-test: true
+      run-race: true
+      run-shell: true
+      run-image: true
+      image-tag: single-fixture:ci
+      image-context: selftest/single
+      image-command: test -n "$(docker images -q single-fixture:ci)"
+      run-boundary: true
+      boundary-command: go test ./... -run TestSingleBoundaryPasses -count=1
+      run-govulncheck: true
+      run-gosec: true
+      gosec-fail-on-findings: false
+      run-actionlint: true
