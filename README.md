@@ -7,7 +7,8 @@ Shared reusable Go CI for Eshu collectors and `eshu-sdk` (versioned, pinned).
   staticcheck — subsumes gosimple in v2 — ineffassign, unused, errcheck;
   formatter gofumpt).
 - Stable job names (frozen): `lint`, `test`, `race`, `shell`, `image`,
-  `govulncheck`, `gosec`, `ci-complete`. Only `ci-complete` is required.
+  `boundary`, `govulncheck`, `gosec`, `actionlint`, `ci-complete`.
+  Only `ci-complete` is required.
 - Rules: whole-repo lint to zero, no baselines; one exclusion = one reason +
   one linked issue; `COVERAGE_FLOOR` only rises; 500-line cap via `wc -l`.
 

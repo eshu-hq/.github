@@ -26,6 +26,20 @@ check_absent() { # $1 = description, $2... = grep -E pattern (must NOT match)
 		pass=$((pass + 1))
 	fi
 }
+check_in_job() { # $1 = description, $2 = job name, $3 = ERE (must match inside that job block)
+	desc="$1"; job="$2"; pat="$3"
+	if awk -v job="$job" -v pat="$pat" '
+		$0 == "  " job ":" {injob = 1; next}
+		injob && /^  [a-z-]+:$/ {injob = 0}
+		injob && ($0 ~ pat) {found = 1}
+		END {exit !found}' "$wf"; then
+		echo "PASS: $desc"
+		pass=$((pass + 1))
+	else
+		echo "FAIL: $desc"
+		fail=$((fail + 1))
+	fi
+}
 
 # v2 path-gating inputs.
 check "run-govulncheck input" "^      run-govulncheck:"
@@ -60,19 +74,29 @@ check_absent "no codeql SARIF upload" 'codeql-action/upload-sarif'
 
 # boundary + actionlint lanes exist and gate.
 check "boundary job" '^  boundary:'
-check "boundary hook gate" "inputs.boundary-command != ''"
 check "actionlint job" '^  actionlint:'
 check "actionlint sha256 gate" 'sha256sum -c'
+
+# Lane skip conditions, anchored per job: deleting a gate must fail.
+check_in_job "lint gated on run-lint" "lint" 'if: inputs\.run-lint'
+check_in_job "test gated on run-test" "test" 'if: inputs\.run-test'
+check_in_job "race gated on run-race" "race" 'if: inputs\.run-race'
+check_in_job "shell gated on run-shell" "shell" 'if: inputs\.run-shell'
+check_in_job "image gated on run-image" "image" 'if: inputs\.run-image'
+check_in_job "boundary gated on hook" "boundary" "if: inputs\.run-boundary && inputs\.boundary-command != ''"
+check_in_job "govulncheck gated on run-govulncheck" "govulncheck" 'if: inputs\.run-govulncheck'
+check_in_job "gosec gated on run-gosec" "gosec" 'if: inputs\.run-gosec'
+check_in_job "actionlint gated on run-actionlint" "actionlint" 'if: inputs\.run-actionlint'
 
 # image hooks.
 check "image tag plumbing" 'inputs.image-tag'
 check "image context plumbing" 'inputs.image-context'
 check "image command hook" 'inputs.image-command'
 
-# Timeout parity: lint 15, image 15, gosec 30.
-check "lint timeout 15" 'timeout-minutes: 15'
-check "image timeout 15" 'timeout-minutes: 15'
-check "gosec timeout 30" 'timeout-minutes: 30'
+# Timeout parity, anchored per job: a per-lane regression must fail.
+check_in_job "lint timeout 15" "lint" 'timeout-minutes: 15'
+check_in_job "image timeout 15" "image" 'timeout-minutes: 15'
+check_in_job "gosec timeout 30" "gosec" 'timeout-minutes: 30'
 
 # v7 action pins throughout; old pins gone.
 check "checkout v7 pin" 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'

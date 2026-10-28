@@ -116,9 +116,9 @@ on:
         default: 'v1.9.0'
         type: string
       gosec-version:
-        description: Org gosec pin (exact, never latest).
+        description: Org gosec pin (exact, never latest; matches the multi-module default).
         required: false
-        default: 'v2.30.0'
+        default: 'v2.27.1'
         type: string
       actionlint-version:
         description: actionlint pin (tarball, sha256-checked).
