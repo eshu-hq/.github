@@ -16,11 +16,22 @@ Caller (each collector `ci.yml`): paths-filter `changes` job, then
 ```yaml
 jobs:
   go-ci:
-    uses: eshu-hq/.github/.github/workflows/go-collector-ci.yml@v1
+    uses: eshu-hq/.github/.github/workflows/go-collector-ci.yml@<peeled-SHA> # v2
     with:
-      coverage-floor: 66.1
+      coverage-floor: 90.5
+      go-version-file: go.mod
       run-image: true
+      image-tag: my-collector:ci
 ```
+
+v2 inputs over v1: `go-version-file` (replaces the `go-version`
+default); `run-govulncheck`, `run-gosec`, `run-actionlint`,
+`run-boundary` path gates; `boundary-command` hook (empty skips);
+`image-tag`, `image-context`, `image-command` hooks;
+`gosec-fail-on-findings` (scheduled runs only); exact tool pins
+(`golangci-lint-version`, `govulncheck-version`, `gosec-version`,
+`actionlint-version` + `actionlint-sha256`). Callers pin the peeled
+commit SHA with a version comment, never the mutable tag.
 
 SDK callers pass `working-directory` per module (`collector`, `factschema`).
 

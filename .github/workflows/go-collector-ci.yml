@@ -1,16 +1,22 @@
-# Reusable Go collector CI — single-module lane bodies.
+# Reusable Go collector CI — single-module lane bodies (v2).
 # Caller: .github/workflows/ci.yml in each collector repo (thin wrapper with
 # paths-filter + job names identical to in-repo implementation).
-# Versioned by tag on eshu-hq/.github (v1, then semver).
-# Stable job names: lint, test, race, shell, image, govulncheck, gosec,
-# ci-complete. Only ci-complete is ever required in a ruleset.
+# Versioned by tag on eshu-hq/.github (v1, v2, then semver); callers pin the
+# peeled commit SHA with a version comment, never the mutable tag.
+# Stable job names: lint, test, race, shell, image, boundary, govulncheck,
+# gosec, actionlint, ci-complete. Only ci-complete is ever required.
+# v2 over v1: run-govulncheck/run-gosec/run-actionlint/run-boundary path
+# gates; pinned govulncheck (scan-package) and gosec (artifact, never
+# blocking, no Security-tab upload so forks stay green); boundary and
+# actionlint lanes; image tag/context/extra-command hooks; timeout parity;
+# go-version-file instead of a version default; v7 action pins throughout.
 name: go-collector-ci (reusable)
 
 on:
   workflow_call:
     inputs:
       module:
-        description: Go module path being gated (informational).
+        description: Go module path being gated (informational, names artifacts).
         required: false
         default: .
         type: string
@@ -24,16 +30,31 @@ on:
         required: false
         default: 0
         type: number
-      go-version:
-        description: Go toolchain version.
+      go-version-file:
+        description: setup-go version file, repo-root-relative (reads the toolchain, never drifts).
         required: false
-        default: "1.26.6"
+        default: 'go.mod'
         type: string
       run-image:
         description: Run the image lane (repo ships a Dockerfile).
         required: false
         default: false
         type: boolean
+      image-tag:
+        description: Tag for the built image; empty keeps a bare build.
+        required: false
+        default: ''
+        type: string
+      image-context:
+        description: Build context directory for the image lane.
+        required: false
+        default: '.'
+        type: string
+      image-command:
+        description: Extra image validation (seed contract, digest pins); empty skips.
+        required: false
+        default: ''
+        type: string
       run-lint:
         description: Set by caller paths-filter for Go/module changes.
         required: false
@@ -54,6 +75,61 @@ on:
         required: false
         default: false
         type: boolean
+      run-boundary:
+        description: Set by caller paths-filter for Go/unclassified/workflow changes.
+        required: false
+        default: true
+        type: boolean
+      boundary-command:
+        description: Boundary gate (import bans, fail-closed guards); empty skips the lane.
+        required: false
+        default: ''
+        type: string
+      run-govulncheck:
+        description: Set by caller paths-filter for dependency/workflow changes.
+        required: false
+        default: true
+        type: boolean
+      run-gosec:
+        description: Set by caller paths-filter for Go/unclassified/workflow changes.
+        required: false
+        default: true
+        type: boolean
+      gosec-fail-on-findings:
+        description: Fail the lane when findings exist (scheduled runs feed issue filing); PRs stay advisory.
+        required: false
+        default: false
+        type: boolean
+      run-actionlint:
+        description: Set by caller paths-filter for workflow/shared changes.
+        required: false
+        default: true
+        type: boolean
+      golangci-lint-version:
+        description: Org golangci-lint pin (exact, never latest).
+        required: false
+        default: 'v2.12.2'
+        type: string
+      govulncheck-version:
+        description: Org govulncheck pin (exact, never latest).
+        required: false
+        default: 'v1.9.0'
+        type: string
+      gosec-version:
+        description: Org gosec pin (exact, never latest).
+        required: false
+        default: 'v2.30.0'
+        type: string
+      actionlint-version:
+        description: actionlint pin (tarball, sha256-checked).
+        required: false
+        default: '1.7.12'
+        type: string
+      actionlint-sha256:
+        description: Expected sha256 of the actionlint tarball.
+        required: false
+        default: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
+        type: string
 
 permissions:
   contents: read
@@ -62,15 +138,15 @@ jobs:
   lint:
     if: inputs.run-lint
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version-file }}
           cache-dependency-path: ${{ inputs.working-directory }}/go.sum
       - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ inputs.golangci-lint-version }}
         working-directory: ${{ inputs.working-directory }}
       - name: vet
         run: go vet ./...
@@ -97,10 +173,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version-file }}
       - name: build
         run: go build ./...
         working-directory: ${{ inputs.working-directory }}
@@ -113,10 +189,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version-file }}
       - name: race + coverprofile
         run: go test ./... -race -count=1 -covermode=atomic -coverprofile=coverage.out
         working-directory: ${{ inputs.working-directory }}
@@ -129,7 +205,7 @@ jobs:
           echo "total=$total floor=${{ inputs.coverage-floor }}"
           awk -v t="$total" -v f="${{ inputs.coverage-floor }}" 'BEGIN { if (t + 0 < f + 0) { print "FAIL: coverage below floor"; exit 1 } }'
         working-directory: ${{ inputs.working-directory }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-${{ inputs.module }}
           path: ${{ inputs.working-directory }}/coverage.out
@@ -140,51 +216,114 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: shellcheck
-        uses: ludeeus/action-shellcheck@00b27aa7cb85167568cb48a3838b75f4265f2bca
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
         with:
           scandir: .
+          format: gcc
 
   image:
     if: inputs.run-image
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: build image (no push)
-        run: docker build .
+        run: |
+          if [ -n "${{ inputs.image-tag }}" ]; then
+            docker build -t "${{ inputs.image-tag }}" "${{ inputs.image-context }}"
+          else
+            docker build "${{ inputs.image-context }}"
+          fi
+      - name: image extra validation (seed contract, digest pins)
+        if: inputs.image-command != ''
+        run: ${{ inputs.image-command }}
 
-  govulncheck:
+  boundary:
+    if: inputs.run-boundary && inputs.boundary-command != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ inputs.go-version }}
-      - name: govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+          go-version-file: ${{ inputs.go-version-file }}
+      - name: boundary gate (caller hook)
+        run: ${{ inputs.boundary-command }}
+        working-directory: ${{ inputs.working-directory }}
+
+  govulncheck:
+    if: inputs.run-govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+      - name: Install govulncheck (org pin, never latest)
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ inputs.govulncheck-version }}
+      - name: govulncheck (package mode is Go 1.26 SSA-safe)
+        run: govulncheck -scan package ./...
         working-directory: ${{ inputs.working-directory }}
 
   gosec:
+    if: inputs.run-gosec
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: gosec SARIF (advisory)
-        uses: securego/gosec@22fd014b7bfcd88c892bfccea1784cade496cdef
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          args: -fmt sarif -out gosec.sarif ./...
-      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+          go-version-file: ${{ inputs.go-version-file }}
+      - name: Install gosec (org pin, never latest)
+        run: go install github.com/securego/gosec/v2/cmd/gosec@${{ inputs.gosec-version }}
+      - name: gosec scan (never blocking; findings ride the artifact)
+        # gosec's bundled type-checker cannot fully load new Go generics
+        # and exits non-zero even with zero findings: the lane itself never
+        # fails, and scheduled runs opt into failure via
+        # gosec-fail-on-findings so issue filing stays reachable. No
+        # Security-tab upload: fork PRs run on a read-only token.
+        run: gosec -fmt sarif -out "$GITHUB_WORKSPACE/gosec.sarif" ./... > "$GITHUB_WORKSPACE/gosec.log" 2>&1 || true
+        working-directory: ${{ inputs.working-directory }}
+      - name: finding count to summary
+        run: |
+          n=$(jq '[.runs[].results[]] | length' "$GITHUB_WORKSPACE/gosec.sarif")
+          echo "## gosec findings: $n" >> "$GITHUB_STEP_SUMMARY"
+          echo "gosec findings: $n"
+      - name: fail on findings (scheduled runs only)
+        if: inputs.gosec-fail-on-findings
+        run: |
+          n=$(jq '[.runs[].results[]] | length' "$GITHUB_WORKSPACE/gosec.sarif")
+          if [ "${n:-0}" -gt 0 ]; then echo "gosec findings; failing to file the issue."; exit 1; fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          sarif_file: gosec.sarif
-        continue-on-error: true
+          name: gosec-${{ inputs.module }}
+          path: |
+            ${{ github.workspace }}/gosec.sarif
+            ${{ github.workspace }}/gosec.log
+          retention-days: 14
+
+  actionlint:
+    if: inputs.run-actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install actionlint (pinned, sha256-checked)
+        env:
+          ACTIONLINT_VERSION: ${{ inputs.actionlint-version }}
+          ACTIONLINT_SHA256: ${{ inputs.actionlint-sha256 }}
+        run: |
+          curl -sSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" -o /tmp/sg-actionlint.tar.gz
+          echo "$ACTIONLINT_SHA256  /tmp/sg-actionlint.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/sg-actionlint.tar.gz -C /tmp actionlint
+      - name: Lint workflows
+        run: /tmp/actionlint -no-color .github/workflows/*.yml
 
   ci-complete:
-    needs: [lint, test, race, shell, image, govulncheck, gosec]
+    needs: [lint, test, race, shell, image, boundary, govulncheck, gosec, actionlint]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

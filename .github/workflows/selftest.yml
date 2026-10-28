@@ -96,3 +96,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: seeded RED/GREEN proof for go-multi-module-ci
         run: bash selftest/check-multi-module.sh
+
+  single-shape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: shape proof for go-collector-ci v2
+        run: bash selftest/check-single.sh
