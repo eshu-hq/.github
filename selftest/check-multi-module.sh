@@ -211,7 +211,8 @@ fi
 
 # --- 10. Matrix lanes expand from the changes outputs (dynamic matrix). ---
 # (matrix context is illegal in job-level `if:`, so selection lives in the
-# matrix itself; actionlint enforces the context rule on every PR.)
+# matrix itself; actionlint enforces the context rule on every PR. A separate
+# job-level emptiness guard (10b) picks the skip mechanism, not the lanes.)
 for lane in "lint:lint" "test:test" "race:race" "vuln:govulncheck" "sec:gosec"; do
   out="${lane%%:*}"; job="${lane##*:}"
   block="$(awk -v job="^  $job:" '$0 ~ job{injob=1; next} injob && /^  (changes|lint|test|race|generate-check|shell|govulncheck|gosec|consumer-compat|actionlint|ci-complete):/{exit} injob' "$WF")"
@@ -226,6 +227,21 @@ if grep -q 'if:.*matrix\.module' "$WF"; then
 else
   pass "no job-level if references matrix"
 fi
+
+# --- 10b. Matrix lanes skip by condition on empty lane lists. ---
+# (an empty strategy matrix reports needs.<job>.result as "failure" in the
+# aggregator — observed on a docs-only run where every lane list was empty —
+# while a condition-skipped job reports "skipped", which ci-complete allows.
+# Each guard must name exactly the changes output its matrix expands from.)
+for lane in "lint:lint" "test:test" "race:race" "vuln:govulncheck" "sec:gosec"; do
+  out="${lane%%:*}"; job="${lane##*:}"
+  block="$(awk -v job="^  $job:" '$0 ~ job{injob=1; next} injob && /^  (changes|lint|test|race|generate-check|shell|govulncheck|gosec|consumer-compat|actionlint|ci-complete):/{exit} injob' "$WF")"
+  if printf '%s\n' "$block" | grep -q "if: needs.changes.outputs.$out != '\[\]'"; then
+    pass "$job skips by condition on empty changes.$out"
+  else
+    fail "$job lacks a job-level if on changes.$out (empty matrix reads as failure)"
+  fi
+done
 
 # --- 11b. Every action pin is 40-hex and recorded-verified (no dead pins). ---
 # (guards the .github#3 class: a dead/truncated SHA must fail shape, not CI;
