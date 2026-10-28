@@ -1,0 +1,499 @@
+# Reusable multi-module Go CI: one call gates N modules (eshu-hq/.github#1).
+# Pass `modules` once; get per-module lint/test/race plus generate-check,
+# shell, govulncheck, gosec, consumer-compat, actionlint, and skip-aware
+# ci-complete. Reference: eshu-sdk .github/workflows/ci.yml. Tag-versioned.
+name: go-multi-module-ci (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      modules:
+        description: JSON array of module dirs holding go.mod.
+        required: true
+        type: string
+      coverage-floors:
+        description: JSON object of module dir to statement floor.
+        required: false
+        default: '{}'
+        type: string
+      fixture-subpaths:
+        description: Fixture dirs selecting test/race lanes (csv).
+        required: false
+        default: 'testdata,schema,fixturepack'
+        type: string
+      generate-check-modules:
+        description: JSON array of modules covered by the generate gate.
+        required: false
+        default: '[]'
+        type: string
+      generate-check-command:
+        description: Repo generate gate, run from the repo root.
+        required: false
+        default: 'make generate-check'
+        type: string
+      generate-check-go-module:
+        description: "setup-go module for generate-check (default: first)."
+        required: false
+        default: ''
+        type: string
+      satellite-repository:
+        description: Compat satellite (owner/name); empty skips the lane.
+        required: false
+        default: ''
+        type: string
+      satellite-ref:
+        description: Pinned satellite ref; required when satellite is set.
+        required: false
+        default: ''
+        type: string
+      primary-module:
+        description: "setup-go module for consumer-compat (default: first)."
+        required: false
+        default: ''
+        type: string
+      consumer-compat-command:
+        description: Compat suite, run from the repo root.
+        required: false
+        default: 'bash scripts/ci/consumer-compat.sh "$GITHUB_WORKSPACE/satellite" "$GITHUB_WORKSPACE"'
+        type: string
+      tidy-check-command:
+        description: Tidy gate, {0} is the module dir; empty keeps inline tidy.
+        required: false
+        default: ''
+        type: string
+      file-cap-command:
+        description: File-cap gate, {0} is the module dir; empty keeps inline cap.
+        required: false
+        default: ''
+        type: string
+      file-cap-deps-command:
+        description: Deps for the file-cap hook (e.g. install ripgrep).
+        required: false
+        default: ''
+        type: string
+      golangci-lint-version:
+        description: Org golangci-lint pin.
+        required: false
+        default: 'v2.12.2'
+        type: string
+      gosec-version:
+        description: Org gosec pin.
+        required: false
+        default: 'v2.27.1'
+        type: string
+      govulncheck-version:
+        description: Org govulncheck pin (exact; never @latest).
+        required: false
+        default: 'v1.9.0'
+        type: string
+      actionlint-version:
+        description: actionlint pin (tarball, sha256-checked).
+        required: false
+        default: '1.7.12'
+        type: string
+      actionlint-sha256:
+        description: Expected sha256 of the actionlint tarball.
+        required: false
+        default: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      lint: ${{ steps.classify.outputs.lint }}
+      test: ${{ steps.classify.outputs.test }}
+      race: ${{ steps.classify.outputs.race }}
+      vuln: ${{ steps.classify.outputs.vuln }}
+      sec: ${{ steps.classify.outputs.sec }}
+      generate: ${{ steps.classify.outputs.generate }}
+      consumer_compat: ${{ steps.classify.outputs.consumer_compat }}
+      shell: ${{ steps.classify.outputs.shell }}
+      actionlint: ${{ steps.classify.outputs.actionlint }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: classify
+        env:
+          MODULES_JSON: ${{ inputs.modules }}
+          FIXTURE_SUBPATHS: ${{ inputs.fixture-subpaths }}
+          GEN_MODULES_JSON: ${{ inputs.generate-check-modules }}
+        run: |
+          python3 - <<'CLASSIFY_EOF' > /tmp/classify.env
+          import fnmatch, json, os, subprocess
+          # SDK ci.yml classifier, generalized. selftest seeds this block.
+          def load_list(name):
+              try:
+                  val = json.loads(os.environ.get(name, "") or "[]")
+              except json.JSONDecodeError:
+                  return []
+              return [str(v) for v in val] if isinstance(val, list) else []
+          def changed_files():
+              override = os.environ.get("CHANGED_FILES", "")
+              if override:
+                  return [l for l in override.splitlines() if l.strip()]
+              event = os.environ.get("GITHUB_EVENT_NAME", "")
+              base = os.environ.get("GITHUB_BASE_REF", "")
+              if event != "pull_request" or not base:
+                  return []
+              subprocess.run(["git", "fetch", "--depth", "1", "origin", base],
+                             check=True, capture_output=True, text=True)
+              out = subprocess.run(["git", "diff", "--name-only",
+                                    "origin/%s...HEAD" % base],
+                                   check=True, capture_output=True, text=True)
+              return [l for l in out.stdout.splitlines() if l.strip()]
+          def classify(files, modules, subs, gen_modules):
+              go = {m: False for m in modules}
+              fix = {m: False for m in modules}
+              workflows = shell = shared = misc = False
+              for f in files:
+                  known = False
+                  if (fnmatch.fnmatch(f, "*AGENTS.md") or fnmatch.fnmatch(f, "*CLAUDE.md")
+                          or fnmatch.fnmatch(f, "*CONTRIBUTING.md")):
+                      shared, known = True, True
+                  if (fnmatch.fnmatch(f, "docs/*") or fnmatch.fnmatch(f, "*.md")
+                          or fnmatch.fnmatch(f, "LICENSE*")):
+                      known = True
+                  for m in modules:
+                      if (fnmatch.fnmatch(f, "%s/*.go" % m)
+                              or f in ("%s/go.mod" % m, "%s/go.sum" % m, "%s/.golangci.yml" % m)):
+                          go[m], known = True, True
+                      for sub in subs:
+                          if fnmatch.fnmatch(f, "%s/%s/*" % (m, sub)):
+                              fix[m], known = True, True
+                  if fnmatch.fnmatch(f, ".github/workflows/*"):
+                      workflows, known = True, True
+                  if fnmatch.fnmatch(f, "*.sh"):
+                      shell, known = True, True
+                  if (f == "Makefile" or fnmatch.fnmatch(f, "scripts/*")
+                          or fnmatch.fnmatch(f, "go.work*") or fnmatch.fnmatch(f, ".github/*")
+                          or fnmatch.fnmatch(f, "*.yml") or fnmatch.fnmatch(f, "*.yaml")):
+                      shared, known = True, True
+                  if not known:
+                      misc = True
+              all_go, all_fix = any(go.values()), any(fix.values())
+              lanes = {
+                  "lint": sorted(m for m in modules if go[m] or workflows or shared or misc),
+                  "test": sorted(m for m in modules if go[m] or fix[m] or workflows or shared or misc),
+                  "race": sorted(m for m in modules if go[m] or all_fix or workflows or shared or misc),
+              }
+              gen_hit = any(go.get(m, False) or fix.get(m, False)
+                            or workflows or shared or misc for m in gen_modules)
+              event = os.environ.get("GITHUB_EVENT_NAME", "")
+              vuln_gate = all_go or workflows or shared or misc
+              # Advisory quirk from the SDK: gosec skips on push to main
+              # but runs on PRs (Go changes) and scheduled runs.
+              sec_gate = (event not in ("pull_request", "push")
+                          or all_go or workflows or shared or misc)
+              lanes["vuln"] = sorted(modules) if vuln_gate else []
+              lanes["sec"] = sorted(modules) if sec_gate else []
+              scalars = {
+                  "generate": gen_hit,
+                  "consumer_compat": all_go or all_fix or workflows or shared or misc,
+                  "shell": shell or misc,
+                  "actionlint": workflows or shared or misc,
+              }
+              return lanes, scalars
+          modules = load_list("MODULES_JSON")
+          if not modules:
+              raise SystemExit("modules must be a non-empty JSON array")
+          subs = [s.strip() for s in os.environ.get("FIXTURE_SUBPATHS", "").split(",") if s.strip()]
+          gen_modules = load_list("GEN_MODULES_JSON")
+          if os.environ.get("GITHUB_EVENT_NAME", "") != "pull_request":
+              lanes = {"lint": sorted(modules), "test": sorted(modules), "race": sorted(modules),
+                       "vuln": sorted(modules), "sec": sorted(modules)}
+              scalars = {"generate": bool(gen_modules), "consumer_compat": True,
+                         "shell": True, "actionlint": True}
+          else:
+              lanes, scalars = classify(changed_files(), modules, subs, gen_modules)
+          for key in ("lint", "test", "race", "vuln", "sec"):
+              print("%s=%s" % (key, json.dumps(lanes[key])))
+          for key in ("generate", "consumer_compat", "shell", "actionlint"):
+              print("%s=%s" % (key, "true" if scalars[key] else "false"))
+          CLASSIFY_EOF
+          cat /tmp/classify.env >> "$GITHUB_OUTPUT"
+
+  lint:
+    needs: changes
+    name: lint (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.lint) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Vet
+        run: GOWORK=off go vet ./...
+        working-directory: ${{ matrix.module }}
+      - name: Install golangci-lint (org pin)
+        run: GOWORK=off go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ inputs.golangci-lint-version }}
+      - name: Lint
+        run: GOWORK=off golangci-lint run ./...
+        working-directory: ${{ matrix.module }}
+      - name: gofumpt diff (must be empty)
+        run: |
+          GOWORK=off golangci-lint fmt --diff ./... > /tmp/mm-fmt.diff
+          if [ -s /tmp/mm-fmt.diff ]; then cat /tmp/mm-fmt.diff; echo 'gofumpt: files need formatting' >&2; exit 1; fi
+        working-directory: ${{ matrix.module }}
+      - name: Tidy diff (inline default)
+        if: inputs.tidy-check-command == ''
+        run: |
+          GOWORK=off go mod tidy -diff
+          git diff --exit-code -- go.mod go.sum
+        working-directory: ${{ matrix.module }}
+      - name: Tidy diff (repo hook, {0} is the module dir)
+        if: inputs.tidy-check-command != ''
+        run: ${{ format(inputs.tidy-check-command, matrix.module) }}
+      - name: File-cap deps (repo hook)
+        if: inputs.file-cap-deps-command != ''
+        run: ${{ inputs.file-cap-deps-command }}
+      - name: File cap (sole static gate)
+        if: inputs.file-cap-command == ''
+        run: |
+          over=$(find . -name '*.go' -not -path './vendor/*' -exec wc -l {} + | awk '$1 > 500 && $2 != "total" {print}')
+          if [ -n "$over" ]; then echo "$over"; echo "FAIL: .go files over 500 lines"; exit 1; fi
+        working-directory: ${{ matrix.module }}
+      - name: File cap (repo hook, {0} is the module dir)
+        if: inputs.file-cap-command != ''
+        run: ${{ format(inputs.file-cap-command, matrix.module) }}
+
+  test:
+    needs: changes
+    name: test (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.test) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Build
+        run: GOWORK=off go build ./...
+        working-directory: ${{ matrix.module }}
+      - name: Test
+        run: GOWORK=off go test ./... -count=1
+        working-directory: ${{ matrix.module }}
+
+  race:
+    needs: changes
+    name: race (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.race) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Resolve artifact slug
+        id: names
+        env:
+          MODULE: ${{ matrix.module }}
+        run: |
+          slug="$(printf '%s' "$MODULE" | tr '/' '-')"
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+      - name: Race
+        run: GOWORK=off go test -race ./... -count=1 -coverprofile=coverage.out
+        working-directory: ${{ matrix.module }}
+      - name: Upload coverprofile
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-${{ steps.names.outputs.slug }}
+          path: ${{ matrix.module }}/coverage.out
+          retention-days: 14
+      - name: Coverage floor
+        env:
+          FLOORS_JSON: ${{ inputs.coverage-floors }}
+          MODULE: ${{ matrix.module }}
+        run: |
+          cd "$MODULE"
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/, "", $3); print $3}')
+          floor=$(printf '%s' "$FLOORS_JSON" | jq -r --arg m "$MODULE" '.[$m] // 0')
+          echo "total=$total floor=$floor"
+          awk -v t="$total" -v f="$floor" 'BEGIN { if (t + 0 < f + 0) { print "FAIL: coverage below floor"; exit 1 } }'
+
+  generate-check:
+    needs: changes
+    if: inputs.generate-check-modules != '[]' && needs.changes.outputs.generate == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve setup module
+        id: gomodule
+        env:
+          GEN_MODULES_JSON: ${{ inputs.generate-check-modules }}
+          OVERRIDE: ${{ inputs.generate-check-go-module }}
+        run: |
+          if [ -n "$OVERRIDE" ]; then mod="$OVERRIDE";
+          else mod="$(printf '%s' "$GEN_MODULES_JSON" | jq -r '.[0] // empty')"; fi
+          [ -n "$mod" ] || { echo "no generate-check module resolved" >&2; exit 1; }
+          echo "mod=$mod" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ steps.gomodule.outputs.mod }}/go.mod
+          cache-dependency-path: ${{ steps.gomodule.outputs.mod }}/go.sum
+      - name: Check generated artifacts
+        run: ${{ inputs.generate-check-command }}
+
+  shell:
+    needs: changes
+    if: needs.changes.outputs.shell == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: shellcheck every tracked shell script
+        run: git ls-files '*.sh' | xargs shellcheck --severity=warning
+
+  govulncheck:
+    needs: changes
+    name: govulncheck (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.vuln) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Install govulncheck (org pin)
+        run: GOWORK=off go install golang.org/x/vuln/cmd/govulncheck@${{ inputs.govulncheck-version }}
+      - name: Scan
+        run: GOWORK=off govulncheck ./...
+        working-directory: ${{ matrix.module }}
+
+  gosec:
+    needs: changes
+    name: gosec (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write
+    strategy:
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.sec) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Resolve artifact slug
+        id: names
+        env:
+          MODULE: ${{ matrix.module }}
+        run: |
+          slug="$(printf '%s' "$MODULE" | tr '/' '-')"
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+      - name: Install gosec (org pin)
+        run: GOWORK=off go install github.com/securego/gosec/v2/cmd/gosec@${{ inputs.gosec-version }}
+      - name: Scan to SARIF
+        # Absolute workspace paths: the scan runs in the module dir, the
+        # upload runs at the repo root, so a relative path drops nested
+        # modules' SARIF silently under warn-on-missing.
+        run: GOWORK=off gosec -fmt sarif -out "$GITHUB_WORKSPACE/gosec-${{ steps.names.outputs.slug }}.sarif" ./... > "$GITHUB_WORKSPACE/gosec-${{ steps.names.outputs.slug }}.log" 2>&1 || true
+        working-directory: ${{ matrix.module }}
+      - name: Upload SARIF
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gosec-${{ steps.names.outputs.slug }}
+          path: |
+            ${{ github.workspace }}/gosec-${{ steps.names.outputs.slug }}.sarif
+            ${{ github.workspace }}/gosec-${{ steps.names.outputs.slug }}.log
+
+  consumer-compat:
+    needs: changes
+    if: inputs.satellite-repository != '' && needs.changes.outputs.consumer_compat == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Assert satellite ref pinned
+        run: test -n "${{ inputs.satellite-ref }}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.satellite-repository }}
+          ref: ${{ inputs.satellite-ref }}
+          path: satellite
+      - name: Resolve setup module
+        id: gomodule
+        env:
+          MODULES_JSON: ${{ inputs.modules }}
+          OVERRIDE: ${{ inputs.primary-module }}
+        run: |
+          if [ -n "$OVERRIDE" ]; then mod="$OVERRIDE";
+          else mod="$(printf '%s' "$MODULES_JSON" | jq -r '.[0] // empty')"; fi
+          [ -n "$mod" ] || { echo "no primary module resolved" >&2; exit 1; }
+          echo "mod=$mod" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ steps.gomodule.outputs.mod }}/go.mod
+          cache-dependency-path: ${{ steps.gomodule.outputs.mod }}/go.sum
+      - name: Satellite suite against the candidate modules
+        run: ${{ inputs.consumer-compat-command }}
+
+  actionlint:
+    needs: changes
+    if: needs.changes.outputs.actionlint == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install actionlint (pinned, sha256-checked)
+        env:
+          ACTIONLINT_VERSION: ${{ inputs.actionlint-version }}
+          ACTIONLINT_SHA256: ${{ inputs.actionlint-sha256 }}
+        run: |
+          curl -sSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" -o /tmp/mm-actionlint.tar.gz
+          echo "$ACTIONLINT_SHA256  /tmp/mm-actionlint.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/mm-actionlint.tar.gz -C /tmp actionlint
+      - name: Lint workflows
+        run: /tmp/actionlint -no-color .github/workflows/*.yml
+
+  ci-complete:
+    needs: [changes, lint, test, race, generate-check, shell, govulncheck, gosec, consumer-compat, actionlint]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: aggregate (pass when needed lanes passed or legitimately skipped)
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          # NEEDS_JSON is toJSON(needs): {job: {"result": ..., "outputs": ...}}.
+          # NOTE: comparing whole job OBJECTS to "failure" never matches
+          # (false-green); expanding needs.*.result gives a bare ARRAY that
+          # kills green runs on AttributeError. Compare v["result"] instead.
+          # Never change this shape without a seeded red proof.
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          bad = {k: v.get("result") for k, v in needs.items()
+                 if isinstance(v, dict) and v.get("result") in ("failure", "cancelled")}
+          if bad:
+              print("FAIL:", bad)
+              raise SystemExit(1)
+          print("ci-complete: pass (skips allowed)")
+          EOF
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}

@@ -1,0 +1,18 @@
+# Live execution proof for go-multi-module-ci: calls the reusable in this
+# repo by local path, gating the selftest fixture modules on every PR/push.
+name: selftest-multimodule-caller
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  actions: write # gosec SARIF artifact upload in the called workflow
+
+jobs:
+  multimodule:
+    uses: ./.github/workflows/go-multi-module-ci.yml
+    with:
+      modules: '["selftest/modules/alpha", "selftest/modules/beta"]'
