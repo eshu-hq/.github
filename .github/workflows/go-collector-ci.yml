@@ -129,7 +129,7 @@ jobs:
           echo "total=$total floor=${{ inputs.coverage-floor }}"
           awk -v t="$total" -v f="${{ inputs.coverage-floor }}" 'BEGIN { if (t + 0 < f + 0) { print "FAIL: coverage below floor"; exit 1 } }'
         working-directory: ${{ inputs.working-directory }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540e4489e45b6eb9f30b0b0df # v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-${{ inputs.module }}
           path: ${{ inputs.working-directory }}/coverage.out
@@ -178,7 +178,7 @@ jobs:
         uses: securego/gosec@22fd014b7bfcd88c892bfccea1784cade496cdef
         with:
           args: -fmt sarif -out gosec.sarif ./...
-      - uses: github/codeql-action/upload-sarif@793b778da9c9275a0f276522b27cb5fc14bba279 # v4
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: gosec.sarif
         continue-on-error: true
