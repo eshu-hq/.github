@@ -240,7 +240,7 @@ ea165f8d65b6e75b540449e92b4886f43607fa02
 00b27aa7cb85167568cb48a3838b75f4265f2bca
 22fd014b7bfcd88c892bfccea1784cade496cdef'
 pin_fail=0
-if refs="$(rg -No --no-filename 'uses: [^ ]+' "$REPO_ROOT"/.github/workflows/*.yml | sed 's/^uses: //')"; then
+if refs="$(grep -rho 'uses: [^ ]*' "$REPO_ROOT"/.github/workflows/*.yml | sed 's/^uses: //')"; then
   if [ -z "$refs" ]; then
     fail "pin census: uses-ref extraction found nothing"
   else
