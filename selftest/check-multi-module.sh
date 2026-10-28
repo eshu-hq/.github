@@ -119,6 +119,28 @@ out="$(run_case pull_request "$SDK_MODS" "$SDK_GEN" 'frobnicator/widget.xyz')"
 expect_line "$out" 'lint=["collector", "factschema"]' "unknown path fails closed on lint"
 expect_contains "$out" shell true "unknown path fails closed on shell"
 
+# --- 6b. Empty or invalid modules input fails closed, never zero lanes. ---
+for badmods in '[]' 'not-json' ''; do
+  if GITHUB_EVENT_NAME=pull_request MODULES_JSON="$badmods" GEN_MODULES_JSON="$SDK_GEN" \
+    FIXTURE_SUBPATHS="testdata,schema,fixturepack" CHANGED_FILES='collector/store.go' \
+    python3 "$CLASSIFIER" >/dev/null 2>&1; then
+    fail "modules input '$badmods' should fail closed"
+  else
+    pass "modules input '$badmods' fails closed"
+  fi
+done
+
+# --- 6c. Gosec SARIF uses absolute workspace paths (nested modules safe). ---
+if grep -q 'GITHUB_WORKSPACE/gosec-' "$WF"; then
+  if grep -q 'github.workspace }}/gosec-' "$WF"; then
+    pass "gosec scan and upload share absolute workspace paths"
+  else
+    fail "gosec upload path is not absolute"
+  fi
+else
+  fail "gosec scan path is not absolute"
+fi
+
 # --- 7. Non-PR events fail closed. ---
 out="$(GITHUB_EVENT_NAME=push MODULES_JSON="$SDK_MODS" GEN_MODULES_JSON="$SDK_GEN" \
   FIXTURE_SUBPATHS="testdata,schema,fixturepack" python3 "$CLASSIFIER")"

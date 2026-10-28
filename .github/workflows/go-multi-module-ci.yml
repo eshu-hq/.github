@@ -200,6 +200,8 @@ jobs:
               }
               return lanes, scalars
           modules = load_list("MODULES_JSON")
+          if not modules:
+              raise SystemExit("modules must be a non-empty JSON array")
           subs = [s.strip() for s in os.environ.get("FIXTURE_SUBPATHS", "").split(",") if s.strip()]
           gen_modules = load_list("GEN_MODULES_JSON")
           if os.environ.get("GITHUB_EVENT_NAME", "") != "pull_request":
@@ -408,15 +410,18 @@ jobs:
       - name: Install gosec (org pin)
         run: GOWORK=off go install github.com/securego/gosec/v2/cmd/gosec@${{ inputs.gosec-version }}
       - name: Scan to SARIF
-        run: GOWORK=off gosec -fmt sarif -out "../gosec-${{ steps.names.outputs.slug }}.sarif" ./... > "../gosec-${{ steps.names.outputs.slug }}.log" 2>&1 || true
+        # Absolute workspace paths: the scan runs in the module dir, the
+        # upload runs at the repo root, so a relative path drops nested
+        # modules' SARIF silently under warn-on-missing.
+        run: GOWORK=off gosec -fmt sarif -out "$GITHUB_WORKSPACE/gosec-${{ steps.names.outputs.slug }}.sarif" ./... > "$GITHUB_WORKSPACE/gosec-${{ steps.names.outputs.slug }}.log" 2>&1 || true
         working-directory: ${{ matrix.module }}
       - name: Upload SARIF
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gosec-${{ steps.names.outputs.slug }}
           path: |
-            gosec-${{ steps.names.outputs.slug }}.sarif
-            gosec-${{ steps.names.outputs.slug }}.log
+            ${{ github.workspace }}/gosec-${{ steps.names.outputs.slug }}.sarif
+            ${{ github.workspace }}/gosec-${{ steps.names.outputs.slug }}.log
 
   consumer-compat:
     needs: changes
