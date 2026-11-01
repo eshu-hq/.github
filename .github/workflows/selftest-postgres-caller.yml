@@ -1,0 +1,38 @@
+# Live execution proof for the opt-in Postgres bootstrap in go-collector-ci:
+# calls the reusable by local path with postgres-* set, gating a fixture whose
+# tests need Postgres on localhost:5432. selftest-single-caller.yml proves the
+# default path (inputs unset) is unchanged. Throwaway CI-only credentials.
+name: selftest-postgres-caller
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selftest-postgres-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres:
+    uses: ./.github/workflows/go-collector-ci.yml
+    with:
+      module: pg-fixture
+      working-directory: selftest/pg
+      go-version-file: selftest/pg/go.mod
+      coverage-floor: 80
+      run-lint: false
+      run-test: true
+      run-race: true
+      run-boundary: false
+      run-govulncheck: false
+      run-gosec: false
+      run-actionlint: false
+      postgres-image: postgres:18
+      postgres-user: claimplane_test
+      postgres-password: claimplane_test
+      postgres-db: claimplane_test_store
+      postgres-extra-databases: claimplane_test_server,claimplane_test_coordinator

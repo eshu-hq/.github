@@ -10,6 +10,8 @@
 # blocking, no Security-tab upload so forks stay green); boundary and
 # actionlint lanes; image tag/context/extra-command hooks; timeout parity;
 # go-version-file instead of a version default; v7 action pins throughout.
+# Additive: postgres-* inputs (all default empty) opt the test and race lanes
+# into a docker-run Postgres bootstrap step; with them unset nothing changes.
 name: go-collector-ci (reusable)
 
 on:
@@ -130,6 +132,38 @@ on:
         required: false
         default: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
         type: string
+      postgres-image:
+        description: >-
+          Opt-in Postgres for the test and race lanes: image to run (for example
+          postgres:18). Empty (default) disables the feature and leaves both lanes
+          byte-for-byte unchanged. When set, a `postgres bootstrap (opt-in)` step
+          starts it as container `ci-postgres` on localhost:5432 before the tests.
+        required: false
+        default: ''
+        type: string
+      postgres-user:
+        description: POSTGRES_USER for the opt-in Postgres; empty means postgres. Must match ^[A-Za-z_][A-Za-z0-9_]*$.
+        required: false
+        default: ''
+        type: string
+      postgres-password:
+        description: POSTGRES_PASSWORD for the opt-in Postgres; required when postgres-image is set. CI-only throwaway value, never a real secret.
+        required: false
+        default: ''
+        type: string
+      postgres-db:
+        description: POSTGRES_DB for the opt-in Postgres; empty means the user name. Must match ^[A-Za-z_][A-Za-z0-9_]*$.
+        required: false
+        default: ''
+        type: string
+      postgres-extra-databases:
+        description: >-
+          Comma-separated extra databases created with CREATE DATABASE after
+          Postgres is ready (whitespace and empty items ignored). Each name must
+          match ^[A-Za-z_][A-Za-z0-9_]*$.
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -177,6 +211,56 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
+      - name: postgres bootstrap (opt-in)
+        if: inputs.postgres-image != ''
+        env:
+          PG_IMAGE: ${{ inputs.postgres-image }}
+          PG_USER: ${{ inputs.postgres-user }}
+          POSTGRES_PASSWORD: ${{ inputs.postgres-password }}
+          PG_DB: ${{ inputs.postgres-db }}
+          PG_EXTRA_DBS: ${{ inputs.postgres-extra-databases }}
+        run: |
+          set -euo pipefail
+          name_re='^[A-Za-z_][A-Za-z0-9_]*$'
+          pg_user="${PG_USER:-postgres}"
+          pg_db="${PG_DB:-$pg_user}"
+          if [ -z "$POSTGRES_PASSWORD" ]; then
+            echo "::error::postgres-password is required when postgres-image is set"
+            exit 1
+          fi
+          extras=()
+          IFS=',' read -ra raw <<<"$PG_EXTRA_DBS"
+          for item in "${raw[@]}"; do
+            item="${item#"${item%%[![:space:]]*}"}"
+            item="${item%"${item##*[![:space:]]}"}"
+            [ -n "$item" ] && extras+=("$item")
+          done
+          for n in "$pg_user" "$pg_db" "${extras[@]}"; do
+            if ! [[ $n =~ $name_re ]]; then
+              echo "::error::invalid postgres identifier: $n (want $name_re)"
+              exit 1
+            fi
+          done
+          export POSTGRES_USER="$pg_user" POSTGRES_DB="$pg_db"
+          docker run -d --name ci-postgres -p 5432:5432 -e POSTGRES_USER -e POSTGRES_PASSWORD -e POSTGRES_DB "$PG_IMAGE"
+          # TCP probe on purpose: the image's init-time server listens on the
+          # unix socket only, so a socket probe reports ready too early.
+          ready=0
+          for _ in $(seq 1 "${PG_READY_TIMEOUT:-60}"); do
+            if docker exec ci-postgres pg_isready -h 127.0.0.1 -p 5432 -U "$pg_user" -d "$pg_db"; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::postgres not ready in time; container logs follow"
+            docker logs ci-postgres || true
+            exit 1
+          fi
+          for db in "${extras[@]}"; do
+            docker exec ci-postgres psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$pg_user" -d "$pg_db" -c "CREATE DATABASE \"$db\";"
+          done
       - name: build
         run: go build ./...
         working-directory: ${{ inputs.working-directory }}
@@ -193,6 +277,56 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
+      - name: postgres bootstrap (opt-in)
+        if: inputs.postgres-image != ''
+        env:
+          PG_IMAGE: ${{ inputs.postgres-image }}
+          PG_USER: ${{ inputs.postgres-user }}
+          POSTGRES_PASSWORD: ${{ inputs.postgres-password }}
+          PG_DB: ${{ inputs.postgres-db }}
+          PG_EXTRA_DBS: ${{ inputs.postgres-extra-databases }}
+        run: |
+          set -euo pipefail
+          name_re='^[A-Za-z_][A-Za-z0-9_]*$'
+          pg_user="${PG_USER:-postgres}"
+          pg_db="${PG_DB:-$pg_user}"
+          if [ -z "$POSTGRES_PASSWORD" ]; then
+            echo "::error::postgres-password is required when postgres-image is set"
+            exit 1
+          fi
+          extras=()
+          IFS=',' read -ra raw <<<"$PG_EXTRA_DBS"
+          for item in "${raw[@]}"; do
+            item="${item#"${item%%[![:space:]]*}"}"
+            item="${item%"${item##*[![:space:]]}"}"
+            [ -n "$item" ] && extras+=("$item")
+          done
+          for n in "$pg_user" "$pg_db" "${extras[@]}"; do
+            if ! [[ $n =~ $name_re ]]; then
+              echo "::error::invalid postgres identifier: $n (want $name_re)"
+              exit 1
+            fi
+          done
+          export POSTGRES_USER="$pg_user" POSTGRES_DB="$pg_db"
+          docker run -d --name ci-postgres -p 5432:5432 -e POSTGRES_USER -e POSTGRES_PASSWORD -e POSTGRES_DB "$PG_IMAGE"
+          # TCP probe on purpose: the image's init-time server listens on the
+          # unix socket only, so a socket probe reports ready too early.
+          ready=0
+          for _ in $(seq 1 "${PG_READY_TIMEOUT:-60}"); do
+            if docker exec ci-postgres pg_isready -h 127.0.0.1 -p 5432 -U "$pg_user" -d "$pg_db"; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::postgres not ready in time; container logs follow"
+            docker logs ci-postgres || true
+            exit 1
+          fi
+          for db in "${extras[@]}"; do
+            docker exec ci-postgres psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$pg_user" -d "$pg_db" -c "CREATE DATABASE \"$db\";"
+          done
       - name: race + coverprofile
         run: go test ./... -race -count=1 -covermode=atomic -coverprofile=coverage.out
         working-directory: ${{ inputs.working-directory }}
