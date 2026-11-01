@@ -111,5 +111,26 @@ check_absent "old shellcheck pin gone" 'action-shellcheck@00b27aa7cb85167568cb48
 # ci-complete covers the new lanes.
 check "ci-complete needs boundary" 'boundary, govulncheck, gosec, actionlint'
 
+# Opt-in Postgres bootstrap: additive inputs, all defaulting to empty.
+check "postgres-image input" "^      postgres-image:"
+check "postgres-user input" "^      postgres-user:"
+check "postgres-password input" "^      postgres-password:"
+check "postgres-db input" "^      postgres-db:"
+check "postgres-extra-databases input" "^      postgres-extra-databases:"
+check_in_job "test bootstrap gated on postgres-image" "test" "if: inputs[.]postgres-image != ''"
+check_in_job "race bootstrap gated on postgres-image" "race" "if: inputs[.]postgres-image != ''"
+check_in_job "test bootstrap passes image via env" "test" 'PG_IMAGE: [$][{][{] inputs[.]postgres-image [}][}]'
+check_in_job "race bootstrap passes image via env" "race" 'PG_IMAGE: [$][{][{] inputs[.]postgres-image [}][}]'
+# Inputs reach the shell only through env: (no interpolation into script text).
+stray=$(grep -E 'inputs\.postgres-' "$wf" | grep -Ev "^ +(PG_[A-Z_]+|POSTGRES_PASSWORD): |if: inputs\.postgres-image != ''" || true)
+if [ -z "$stray" ]; then
+	echo "PASS: postgres inputs only referenced via env: and if:"
+	pass=$((pass + 1))
+else
+	echo "FAIL: postgres input interpolated elsewhere:"
+	echo "$stray"
+	fail=$((fail + 1))
+fi
+
 echo "single shape proof: $pass PASS, $fail FAIL"
 test "$fail" -eq 0

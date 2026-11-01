@@ -62,3 +62,24 @@ jobs:
   classifier with RED/GREEN file lists (wired as `multimodule-shape` in
   `selftest.yml`); `selftest-multimodule-caller.yml` executes the reusable
   against `selftest/modules/{alpha,beta}` on every PR and push.
+
+- Opt-in Postgres for `test`/`race` (single-module entrypoint). GitHub job
+  `services:` cannot be toggled by an input, so a `postgres bootstrap
+  (opt-in)` step runs `docker run` before the tests when `postgres-image` is
+  set (empty default = off, lanes unchanged). Inputs: `postgres-image`,
+  `postgres-user` (default `postgres`), `postgres-password` (required when
+  on; CI-only throwaway), `postgres-db` (default the user),
+  `postgres-extra-databases` (comma-separated, created with `CREATE
+  DATABASE`). Names must match `^[A-Za-z_][A-Za-z0-9_]*$`. The server listens
+  on `localhost:5432`; readiness is a bounded (60 s) TCP `pg_isready` loop
+  that dumps container logs on failure. Proofs: `selftest/check-postgres.sh`
+  (stub-docker behavior) and `selftest-postgres-caller.yml` (live).
+
+```yaml
+    with:
+      postgres-image: postgres:18
+      postgres-user: claimplane_test
+      postgres-password: claimplane_test
+      postgres-db: claimplane_test_store
+      postgres-extra-databases: claimplane_test_server,claimplane_test_coordinator
+```
