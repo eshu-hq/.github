@@ -29,7 +29,9 @@ v2 inputs over v1: `go-version-file` (replaces the `go-version`
 default); `run-govulncheck`, `run-gosec`, `run-actionlint`,
 `run-boundary` path gates; `boundary-command` hook (empty skips);
 `image-tag`, `image-context`, `image-command` hooks;
-`gosec-fail-on-findings` (scheduled runs only); exact tool pins
+`gosec-fail-on-findings` (fail the gosec lane on findings, on any event;
+default false is advisory; the SARIF and log upload even when it fails;
+an empty SARIF fails the lane either way); exact tool pins
 (`golangci-lint-version`, `govulncheck-version`, `gosec-version`,
 `actionlint-version` + `actionlint-sha256`). Callers pin the peeled
 commit SHA with a version comment, never the mutable tag.
