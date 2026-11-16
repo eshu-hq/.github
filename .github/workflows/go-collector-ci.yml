@@ -98,7 +98,7 @@ on:
         default: true
         type: boolean
       gosec-fail-on-findings:
-        description: Fail the lane when findings exist (scheduled runs feed issue filing); PRs stay advisory.
+        description: Fail the gosec lane when it reports findings, on any event (the SARIF and log are still uploaded). Default false keeps findings advisory.
         required: false
         default: false
         type: boolean
@@ -415,28 +415,61 @@ jobs:
         run: go install github.com/securego/gosec/v2/cmd/gosec@${{ inputs.gosec-version }}
       - name: gosec scan (never blocking; findings ride the artifact)
         # gosec's bundled type-checker cannot fully load new Go generics
-        # and exits non-zero even with zero findings: the lane itself never
-        # fails, and scheduled runs opt into failure via
-        # gosec-fail-on-findings so issue filing stays reachable. No
+        # and exits non-zero even with zero findings: this step itself never
+        # fails the lane. Callers opt into failing on findings, on any event
+        # (scheduled runs and pull requests alike), via gosec-fail-on-findings;
+        # with it false (the default) findings stay advisory. No
         # Security-tab upload: fork PRs run on a read-only token.
         run: gosec -fmt sarif -out "$GITHUB_WORKSPACE/gosec.sarif" ./... > "$GITHUB_WORKSPACE/gosec.log" 2>&1 || true
         working-directory: ${{ inputs.working-directory }}
       - name: finding count to summary
         run: |
+          # A missing or zero-byte SARIF means gosec crashed (killed
+          # mid-write); jq would read an empty file as zero findings and
+          # turn the lane green, so refuse it here.
+          if ! test -s "$GITHUB_WORKSPACE/gosec.sarif"; then
+            echo "gosec produced no SARIF (crashed?); see gosec.log." >&2
+            tail -n 40 "$GITHUB_WORKSPACE/gosec.log" >&2 || true
+            exit 1
+          fi
           n=$(jq '[.runs[].results[]] | length' "$GITHUB_WORKSPACE/gosec.sarif")
           echo "## gosec findings: $n" >> "$GITHUB_STEP_SUMMARY"
           echo "gosec findings: $n"
-      - name: fail on findings (scheduled runs only)
+      - name: fail on findings (when gosec-fail-on-findings is set)
         if: inputs.gosec-fail-on-findings
+        env:
+          GOSEC_ARTIFACT: gosec-${{ inputs.module }}
         run: |
-          n=$(jq '[.runs[].results[]] | length' "$GITHUB_WORKSPACE/gosec.sarif")
-          if [ "${n:-0}" -gt 0 ]; then echo "gosec findings; failing to file the issue."; exit 1; fi
+          sarif="$GITHUB_WORKSPACE/gosec.sarif"
+          n=$(jq '[.runs[].results[]] | length' "$sarif")
+          if [ "${n:-0}" -gt 0 ]; then
+            # List the first 20 findings so a red run reads without
+            # downloading the artifact; the full SARIF is still uploaded.
+            top=$(jq -r '[.runs[].results[]
+              | "\(.ruleId // "unknown") \(.locations[0].physicalLocation.artifactLocation.uri // "unknown"):\(.locations[0].physicalLocation.region.startLine // 0)"]
+              | .[:20][]' "$sarif")
+            shown=$(printf '%s\n' "$top" | wc -l | tr -d ' ')
+            echo "gosec findings: $n; showing the first $shown (rule file:line):"
+            printf '%s\n' "$top"
+            {
+              echo "### gosec findings that failed this lane (first $shown of $n)"
+              echo '```'
+              printf '%s\n' "$top"
+              echo '```'
+              echo "Full report: the $GOSEC_ARTIFACT artifact (gosec.sarif, gosec.log)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "gosec findings; failing the lane (gosec-fail-on-findings is true)."
+            exit 1
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        # Upload on a red lane too: the SARIF and log are the evidence.
+        if: always()
         with:
           name: gosec-${{ inputs.module }}
           path: |
             ${{ github.workspace }}/gosec.sarif
             ${{ github.workspace }}/gosec.log
+          if-no-files-found: warn
           retention-days: 14
 
   actionlint:
