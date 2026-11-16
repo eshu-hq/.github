@@ -165,5 +165,21 @@ check_in_gosec "fail step gated on the input" '^        if: inputs[.]gosec-fail-
 check_in_gosec "scan step still never blocks" '[|][|] true$'
 lacks "no stale scheduled-only wording" "$wf" 'scheduled runs only|to file the issue|PRs stay advisory|scheduled runs opt into'
 
+# go-multi-module-ci.yml carries the same lane: its SARIF upload must also run
+# on a red lane and tolerate a missing file. (That lane has no
+# fail-on-findings input and never gates on findings, so only the upload
+# shape applies.)
+mm=".github/workflows/go-multi-module-ci.yml"
+check_in_mm_gosec() { # NAME ERE
+	if awk -v pat="$2" '
+		$0 == "  gosec:" { injob = 1; next }
+		injob && /^  [a-z-]+:$/ { injob = 0 }
+		injob && ($0 ~ pat) { found = 1 }
+		END { exit !found }' "$mm"; then ok "$1"; else bad "$1"; fi
+}
+check_in_mm_gosec "multi-module upload runs on a red lane" '^        if: always[(][)]$'
+check_in_mm_gosec "multi-module upload tolerates a missing SARIF" '^          if-no-files-found: warn$'
+check_in_mm_gosec "multi-module scan step still never blocks" '[|][|] true$'
+
 echo "gosec lane proof: $pass PASS, $fail FAIL"
 test "$fail" -eq 0
