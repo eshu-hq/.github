@@ -117,6 +117,10 @@ check "postgres-user input" "^      postgres-user:"
 check "postgres-password input" "^      postgres-password:"
 check "postgres-db input" "^      postgres-db:"
 check "postgres-extra-databases input" "^      postgres-extra-databases:"
+# Per-lane go test timeouts: additive string inputs (behavior: check-timeouts.sh).
+check "test-timeout input" "^      test-timeout:"
+check "race-test-timeout input" "^      race-test-timeout:"
+
 check_in_job "test bootstrap gated on postgres-image" "test" "if: inputs[.]postgres-image != ''"
 check_in_job "race bootstrap gated on postgres-image" "race" "if: inputs[.]postgres-image != ''"
 check_in_job "test bootstrap passes image via env" "test" 'PG_IMAGE: [$][{][{] inputs[.]postgres-image [}][}]'

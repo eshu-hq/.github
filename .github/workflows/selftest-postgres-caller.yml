@@ -1,7 +1,9 @@
 # Live execution proof for the opt-in Postgres bootstrap in go-collector-ci:
 # calls the reusable by local path with postgres-* set, gating a fixture whose
 # tests need Postgres on localhost:5432. selftest-single-caller.yml proves the
-# default path (inputs unset) is unchanged. Throwaway CI-only credentials.
+# default path (inputs unset) is unchanged. It also overrides test-timeout and
+# race-test-timeout (the single caller leaves them at their defaults).
+# Throwaway CI-only credentials.
 name: selftest-postgres-caller
 
 on:
@@ -31,6 +33,8 @@ jobs:
       run-govulncheck: false
       run-gosec: false
       run-actionlint: false
+      test-timeout: 8m
+      race-test-timeout: 12m
       postgres-image: postgres:18
       postgres-user: claimplane_test
       postgres-password: claimplane_test
