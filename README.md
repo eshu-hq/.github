@@ -85,3 +85,25 @@ jobs:
       postgres-db: claimplane_test_store
       postgres-extra-databases: claimplane_test_server,claimplane_test_coordinator
 ```
+
+- `go test -timeout` for `test` and `race` (single-module entrypoint). Go's
+  own default is 10 minutes per test binary, and a race run on a slow runner
+  can pass it while the lane's 15-minute job limit is still open. Inputs:
+  `test-timeout` (default `9m`, under the 10-minute `test` job limit) and
+  `race-test-timeout` (default `13m`, leaving two minutes of the 15-minute
+  `race` job limit for checkout, toolchain and the coverage upload). Format:
+  a whole number plus `s`, `m` or `h`; the validate step (the second step of
+  the lane, after checkout and before setup-go) fails on anything else. Job
+  `timeout-minutes` did not change, so a hang usually ends in Go's goroutine
+  dump instead of an opaque job cancel. Usually, not always: checkout,
+  setup-go, the optional Postgres bootstrap and the race compile count against
+  the job limit but not against `-timeout`, so on a cold cache the job cancel
+  can fire first. Callers that set nothing get the defaults. Proof:
+  `selftest/check-timeouts.sh`. `go-multi-module-ci.yml` is unchanged: its
+  `go test` and `go test -race` still run with Go's default 10-minute limit
+  (follow-up: eshu-hq/.github#16).
+
+```yaml
+    with:
+      race-test-timeout: 14m
+```

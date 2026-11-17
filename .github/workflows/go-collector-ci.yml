@@ -12,6 +12,17 @@
 # go-version-file instead of a version default; v7 action pins throughout.
 # Additive: postgres-* inputs (all default empty) opt the test and race lanes
 # into a docker-run Postgres bootstrap step; with them unset nothing changes.
+# Additive: test-timeout (default 9m) and race-test-timeout (default 13m) are
+# passed to `go test -timeout` in the test and race lanes. Go's own default is
+# 10m per test binary, which a race run on a slow runner can exceed. Each stays
+# under its job limit (test 10m, race 15m), so a hang usually ends in Go's
+# goroutine dump instead of an opaque job cancel. Usually, not always: checkout,
+# setup-go, the optional Postgres bootstrap and the race compile count against
+# the job limit but not against -timeout, so on a cold cache the job cancel can
+# still fire first. Format: whole number plus s, m or h (13m, 90s, 1h); anything
+# else fails the lane in its validate step (second step, after checkout, before
+# setup-go). Callers that set nothing get the defaults. Override example:
+# `race-test-timeout: 14m`.
 name: go-collector-ci (reusable)
 
 on:
@@ -132,6 +143,22 @@ on:
         required: false
         default: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
         type: string
+      test-timeout:
+        description: >-
+          Value for `go test -timeout` in the test lane: a whole number plus s, m or h
+          (for example 9m). Keep it under the lane's 10 minute job limit so a hang
+          usually yields Go's goroutine dump rather than a job cancel.
+        required: false
+        default: '9m'
+        type: string
+      race-test-timeout:
+        description: >-
+          Value for `go test -timeout` in the race lane: a whole number plus s, m or h
+          (for example 13m). Keep it under the lane's 15 minute job limit and leave
+          room for checkout, toolchain setup and the coverage upload.
+        required: false
+        default: '13m'
+        type: string
       postgres-image:
         description: >-
           Opt-in Postgres for the test and race lanes: image to run (for example
@@ -208,6 +235,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: validate test-timeout
+        env:
+          TEST_TIMEOUT: ${{ inputs.test-timeout }}
+        run: |
+          if ! [[ $TEST_TIMEOUT =~ ^[1-9][0-9]*(s|m|h)$ ]]; then
+            printf '::error::test-timeout must be a whole number plus s, m or h (for example 9m); got: %q\n' "$TEST_TIMEOUT"
+            exit 1
+          fi
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
@@ -265,7 +300,9 @@ jobs:
         run: go build ./...
         working-directory: ${{ inputs.working-directory }}
       - name: test
-        run: go test ./... -count=1
+        env:
+          TEST_TIMEOUT: ${{ inputs.test-timeout }}
+        run: go test ./... -count=1 -timeout "$TEST_TIMEOUT"
         working-directory: ${{ inputs.working-directory }}
 
   race:
@@ -274,6 +311,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: validate race-test-timeout
+        env:
+          RACE_TEST_TIMEOUT: ${{ inputs.race-test-timeout }}
+        run: |
+          if ! [[ $RACE_TEST_TIMEOUT =~ ^[1-9][0-9]*(s|m|h)$ ]]; then
+            printf '::error::race-test-timeout must be a whole number plus s, m or h (for example 13m); got: %q\n' "$RACE_TEST_TIMEOUT"
+            exit 1
+          fi
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ${{ inputs.go-version-file }}
@@ -328,7 +373,9 @@ jobs:
             docker exec ci-postgres psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$pg_user" -d "$pg_db" -c "CREATE DATABASE \"$db\";"
           done
       - name: race + coverprofile
-        run: go test ./... -race -count=1 -covermode=atomic -coverprofile=coverage.out
+        env:
+          RACE_TEST_TIMEOUT: ${{ inputs.race-test-timeout }}
+        run: go test ./... -race -count=1 -covermode=atomic -coverprofile=coverage.out -timeout "$RACE_TEST_TIMEOUT"
         working-directory: ${{ inputs.working-directory }}
       - name: coverage totals
         run: go tool cover -func=coverage.out | tail -n 30 >> "$GITHUB_STEP_SUMMARY"
