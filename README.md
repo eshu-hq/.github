@@ -92,10 +92,16 @@ jobs:
   `test-timeout` (default `9m`, under the 10-minute `test` job limit) and
   `race-test-timeout` (default `13m`, leaving two minutes of the 15-minute
   `race` job limit for checkout, toolchain and the coverage upload). Format:
-  a whole number plus `s`, `m` or `h`; the first step of the lane fails on
-  anything else. Job `timeout-minutes` did not change, so a hang ends in Go's
-  goroutine dump instead of an opaque job cancel. Callers that set nothing get
-  the defaults. Proof: `selftest/check-timeouts.sh`.
+  a whole number plus `s`, `m` or `h`; the validate step (the second step of
+  the lane, after checkout and before setup-go) fails on anything else. Job
+  `timeout-minutes` did not change, so a hang usually ends in Go's goroutine
+  dump instead of an opaque job cancel. Usually, not always: checkout,
+  setup-go, the optional Postgres bootstrap and the race compile count against
+  the job limit but not against `-timeout`, so on a cold cache the job cancel
+  can fire first. Callers that set nothing get the defaults. Proof:
+  `selftest/check-timeouts.sh`. `go-multi-module-ci.yml` is unchanged: its
+  `go test` and `go test -race` still run with Go's default 10-minute limit
+  (follow-up: eshu-hq/.github#16).
 
 ```yaml
     with:

@@ -15,10 +15,14 @@
 # Additive: test-timeout (default 9m) and race-test-timeout (default 13m) are
 # passed to `go test -timeout` in the test and race lanes. Go's own default is
 # 10m per test binary, which a race run on a slow runner can exceed. Each stays
-# under its job limit (test 10m, race 15m) so a hang yields Go's goroutine dump
-# instead of an opaque job cancel. Format: whole number plus s, m or h (13m,
-# 90s, 1h); anything else fails the lane in its first step. Callers that set
-# nothing get the defaults. Override example: `race-test-timeout: 14m`.
+# under its job limit (test 10m, race 15m), so a hang usually ends in Go's
+# goroutine dump instead of an opaque job cancel. Usually, not always: checkout,
+# setup-go, the optional Postgres bootstrap and the race compile count against
+# the job limit but not against -timeout, so on a cold cache the job cancel can
+# still fire first. Format: whole number plus s, m or h (13m, 90s, 1h); anything
+# else fails the lane in its validate step (second step, after checkout, before
+# setup-go). Callers that set nothing get the defaults. Override example:
+# `race-test-timeout: 14m`.
 name: go-collector-ci (reusable)
 
 on:
@@ -143,7 +147,7 @@ on:
         description: >-
           Value for `go test -timeout` in the test lane: a whole number plus s, m or h
           (for example 9m). Keep it under the lane's 10 minute job limit so a hang
-          yields Go's goroutine dump rather than a job cancel.
+          usually yields Go's goroutine dump rather than a job cancel.
         required: false
         default: '9m'
         type: string

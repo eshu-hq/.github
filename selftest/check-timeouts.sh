@@ -33,6 +33,18 @@ extract() {
 	' "$wf"
 }
 
+# env_of JOB STEP: print the env: mapping lines of STEP inside JOB.
+env_of() {
+	awk -v job="$1" -v step="$2" '
+		$0 == "  " job ":" { injob = 1; next }
+		injob && /^  [a-z-]+:$/ { injob = 0; instep = 0; inenv = 0 }
+		injob && /^      - / { instep = ($0 == "      - name: " step); inenv = 0; next }
+		instep && /^        env:$/ { inenv = 1; next }
+		instep && inenv && /^          / { print; next }
+		instep && inenv { inenv = 0 }
+	' "$wf"
+}
+
 # Stub go: records its argv on one line.
 mkdir -p "$work/bin"
 cat >"$work/bin/go" <<'STUB'
@@ -70,6 +82,18 @@ for lane in test race; do
 		if [ -s "$work/$lane-$s.sh" ]; then ok "$job job carries its $s step"; else bad "$job job carries its $s step"; fi
 	done
 	[ -s "$work/$lane-validate.sh" ] && [ -s "$work/$lane-go.sh" ] || continue
+
+	# The step's env: maps the variable to the matching input and nothing else.
+	# The scripts above are fed the variable directly, so without this check a
+	# swapped input or a constant in env: would pass every replay.
+	for step in "$vstep" "$gostep"; do
+		got_env="$(env_of "$job" "$step")"
+		if [ "$got_env" = "          $var: \${{ inputs.$input }}" ]; then
+			ok "$job job step [$step] maps $var from inputs.$input"
+		else
+			bad "$job job step [$step] maps $var from inputs.$input (env was: ${got_env:-none})"
+		fi
+	done
 
 	# The input is declared as a string with the documented default.
 	if awk -v n="$input" '
