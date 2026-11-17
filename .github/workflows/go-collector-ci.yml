@@ -14,15 +14,19 @@
 # into a docker-run Postgres bootstrap step; with them unset nothing changes.
 # Additive: test-timeout (default 9m) and race-test-timeout (default 13m) are
 # passed to `go test -timeout` in the test and race lanes. Go's own default is
-# 10m per test binary, which a race run on a slow runner can exceed. Each stays
-# under its job limit (test 10m, race 15m), so a hang usually ends in Go's
-# goroutine dump instead of an opaque job cancel. Usually, not always: checkout,
-# setup-go, the optional Postgres bootstrap and the race compile count against
-# the job limit but not against -timeout, so on a cold cache the job cancel can
-# still fire first. Format: whole number plus s, m or h (13m, 90s, 1h); anything
-# else fails the lane in its validate step (second step, after checkout, before
-# setup-go). Callers that set nothing get the defaults. Override example:
-# `race-test-timeout: 14m`.
+# 10m per test binary, which a race run on a slow runner can exceed. The test
+# lane's job limit is 10m and the race lane's is 25m, so a hang usually ends in
+# Go's goroutine dump instead of an opaque job cancel. Usually, not always:
+# checkout, setup-go, the optional Postgres bootstrap, the race compile and the
+# coverage upload count against the job limit but not against -timeout, so on a
+# cold cache the job cancel can still fire first. For that reason the race
+# validate step rejects a race-test-timeout above 21m: the 25m job limit minus
+# 4m of room for that work (job_limit_min and margin_min in that step; keep
+# job_limit_min equal to the race job's timeout-minutes, selftest/check-timeouts.sh
+# fails when they differ). Format: whole number plus s, m or h (13m, 90s, 1h);
+# anything else fails the lane in its validate step (second step, after checkout,
+# before setup-go). Callers that set nothing get the defaults. Override example:
+# `race-test-timeout: 20m`.
 name: go-collector-ci (reusable)
 
 on:
@@ -154,8 +158,9 @@ on:
       race-test-timeout:
         description: >-
           Value for `go test -timeout` in the race lane: a whole number plus s, m or h
-          (for example 13m). Keep it under the lane's 15 minute job limit and leave
-          room for checkout, toolchain setup and the coverage upload.
+          (for example 13m). The race job is cut off at 25 minutes and the lane
+          rejects a value above 21m, which leaves 4 minutes for checkout, toolchain
+          setup, the race compile and the coverage upload.
         required: false
         default: '13m'
         type: string
@@ -308,7 +313,7 @@ jobs:
   race:
     if: inputs.run-race
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: validate race-test-timeout
@@ -317,6 +322,25 @@ jobs:
         run: |
           if ! [[ $RACE_TEST_TIMEOUT =~ ^[1-9][0-9]*(s|m|h)$ ]]; then
             printf '::error::race-test-timeout must be a whole number plus s, m or h (for example 13m); got: %q\n' "$RACE_TEST_TIMEOUT"
+            exit 1
+          fi
+          # The race job is cut off at job_limit_min minutes (keep this equal to
+          # its timeout-minutes). Checkout, setup-go, the race compile and the
+          # coverage upload run outside -timeout, so keep margin_min minutes of
+          # room: a hang then ends in Go's goroutine dump, not a job cancel.
+          job_limit_min=25
+          margin_min=4
+          max_min=$((job_limit_min - margin_min))
+          num=${RACE_TEST_TIMEOUT%[smh]}
+          case ${RACE_TEST_TIMEOUT: -1} in
+            s) mult=1 ;;
+            m) mult=60 ;;
+            h) mult=3600 ;;
+          esac
+          # More than 6 digits is far past any limit; checking the length first
+          # keeps the arithmetic below clear of 64-bit overflow.
+          if [ "${#num}" -gt 6 ] || [ $((10#$num * mult)) -gt $((max_min * 60)) ]; then
+            printf '::error::race-test-timeout %q leaves less than %d minutes under the %d minute race job limit; the largest accepted value is %dm\n' "$RACE_TEST_TIMEOUT" "$margin_min" "$job_limit_min" "$max_min"
             exit 1
           fi
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

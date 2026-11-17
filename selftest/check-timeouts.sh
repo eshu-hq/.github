@@ -4,8 +4,10 @@
 # scripts from the test and race jobs and replays them against a stub `go`,
 # so the effective command line and the bad-value guard are exercised without
 # a toolchain. Also asserts the shape points that cannot be replayed: inputs
-# reach the shell only through env:, the job timeouts did not move, and the
-# header comment names both inputs.
+# reach the shell only through env:, the race job limit is 25 minutes and
+# matches the race validate step's job_limit_min, and the header comment names
+# both inputs. The race validate step also bounds race-test-timeout under the
+# job limit (issue #18).
 # Run: bash selftest/check-timeouts.sh (from the repo root).
 set -euo pipefail
 
@@ -66,11 +68,11 @@ run_script() {
 
 for lane in test race; do
 	if [ "$lane" = test ]; then
-		job=test var=TEST_TIMEOUT input=test-timeout want_default=9m
+		job=test var=TEST_TIMEOUT input=test-timeout want_default=9m want_override=8m
 		gostep="test"
 		want_pre="go test ./... -count=1"
 	else
-		job=race var=RACE_TEST_TIMEOUT input=race-test-timeout want_default=13m
+		job=race var=RACE_TEST_TIMEOUT input=race-test-timeout want_default=13m want_override=20m
 		gostep="race + coverprofile"
 		want_pre="go test ./... -race -count=1 -covermode=atomic -coverprofile=coverage.out"
 	fi
@@ -119,10 +121,17 @@ for lane in test race; do
 		cat "$work/log" "$work/out"
 	fi
 
-	run_script "$work/$lane-go.sh" "$var=25m"
-	if grep -Fxq "$want_pre -timeout 25m" "$work/log"; then ok "$lane: caller override 25m reaches go test"; else bad "$lane: caller override 25m reaches go test"; fi
+	run_script "$work/$lane-go.sh" "$var=$want_override"
+	if grep -Fxq "$want_pre -timeout $want_override" "$work/log"; then ok "$lane: caller override $want_override reaches go test"; else bad "$lane: caller override $want_override reaches go test"; fi
 
-	for good in 90s 13m 2h 1s; do
+	# The test lane's validate step is format-only. The race lane's also bounds
+	# the value under its job limit: 25m job minus 4m of room is 21m (1260s).
+	if [ "$lane" = test ]; then
+		goods="90s 9m 13m 2h 1s"
+	else
+		goods="90s 13m 20m 21m 1260s 1s"
+	fi
+	for good in $goods; do
 		run_script "$work/$lane-validate.sh" "$var=$good"
 		if [ "$got" -eq 0 ]; then ok "$lane: guard accepts [$good]"; else bad "$lane: guard accepts [$good]"; fi
 	done
@@ -138,6 +147,34 @@ id' '13m -run X' 'foo'; do
 		fi
 	done
 
+	if [ "$lane" = race ]; then
+		# Over the bound: well-formed values that leave under 4 minutes of the
+		# 25 minute job. The last two are past 64-bit range, so they must be
+		# rejected on length before any arithmetic can wrap them under the bound.
+		for over in 22m 1261s 25m 26m 1500s 1h 2h 1000000s 99999999999999999999s 9999999999999999999h; do
+			run_script "$work/$lane-validate.sh" "$var=$over"
+			if [ "$got" -ne 0 ] && grep -Fq "::error::race-test-timeout" "$work/out" && grep -Fq "25 minute race job limit" "$work/out" && grep -Fq "largest accepted value is 21m" "$work/out"; then
+				ok "$lane: guard rejects [$over] as over the job limit"
+			else
+				bad "$lane: guard rejects [$over] as over the job limit"
+				cat "$work/out"
+			fi
+		done
+
+		# The limit in the validate step must be the race job's timeout-minutes,
+		# or the bound protects a different ceiling than the one that cancels.
+		jobmin=$(awk '
+			$0 == "  race:" { injob = 1; next }
+			injob && /^  [a-z-]+:$/ { injob = 0 }
+			injob && /^    timeout-minutes: / { sub(/.*: /, ""); print; exit }' "$wf")
+		scriptmin=$(sed -n 's/^job_limit_min=\([0-9][0-9]*\)$/\1/p' "$work/race-validate.sh")
+		if [ -n "$jobmin" ] && [ "$jobmin" = "$scriptmin" ]; then
+			ok "race validate step job_limit_min ($scriptmin) equals the race job timeout-minutes ($jobmin)"
+		else
+			bad "race validate step job_limit_min (${scriptmin:-none}) equals the race job timeout-minutes (${jobmin:-none})"
+		fi
+	fi
+
 	# Guard order: validate runs before setup-go and the go test step.
 	order=$(awk -v job="$job" '
 		$0 == "  " job ":" { injob = 1; next }
@@ -151,8 +188,9 @@ done
 stray=$(grep -nE 'inputs\.(race-)?test-timeout' "$wf" | grep -vE '^[0-9]+: +(TEST_TIMEOUT|RACE_TEST_TIMEOUT): ' || true)
 if [ -z "$stray" ]; then ok "timeout inputs only referenced via env:"; else bad "timeout input interpolated elsewhere:"; echo "$stray"; fi
 
-# Job limits are untouched: the input default must stay under them.
-for pair in test:10 race:15; do
+# Job limits: test stays 10; race is 25 (issue #18) so race-test-timeout can
+# reach 21m with 4m of room. Both defaults stay under them.
+for pair in test:10 race:25; do
 	j="${pair%%:*}" m="${pair##*:}"
 	if awk -v job="$j" -v m="$m" '
 		$0 == "  " job ":" { injob = 1; next }
@@ -163,7 +201,12 @@ done
 
 # Header comment names both inputs.
 for i in test-timeout race-test-timeout; do
-	if sed -n '1,25p' "$wf" | grep -qE "^# .*(^|[^a-z-])$i([^a-z-]|$)"; then ok "header comment names $i"; else bad "header comment names $i"; fi
+	if sed -n '1,/^name:/p' "$wf" | grep -qE "^# .*(^|[^a-z-])$i([^a-z-]|$)"; then ok "header comment names $i"; else bad "header comment names $i"; fi
+done
+
+# Header comment states the race job limit and the 21m bound.
+for phrase in 'race lane.s is 25m' 'above 21m' 'job_limit_min'; do
+	if sed -n '1,/^name:/p' "$wf" | grep -qE "^# .*$phrase"; then ok "header comment says [$phrase]"; else bad "header comment says [$phrase]"; fi
 done
 
 echo "timeout inputs proof: $pass PASS, $fail FAIL"
